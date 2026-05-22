@@ -10,6 +10,7 @@ __pycache__/
 .seedance_web_config.json
 server_console_paste_env_command.txt
 server_console_diagnose_8080.txt
+server_console_install_named_tunnel.txt
 
 seedance_web_outputs/
 seedance_web_logs/
