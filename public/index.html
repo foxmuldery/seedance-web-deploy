@@ -1,0 +1,153 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>兔狲视频生成器</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --ink: #17202a;
+        --muted: #637083;
+        --line: #dce3ea;
+        --panel: #f7f9fb;
+        --accent: #0f8b8d;
+        --accent-dark: #0b696b;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        min-height: 100vh;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        color: var(--ink);
+        background: #ffffff;
+      }
+
+      main {
+        max-width: 960px;
+        margin: 0 auto;
+        padding: 56px 24px 72px;
+      }
+
+      .eyebrow {
+        color: var(--accent-dark);
+        font-size: 14px;
+        font-weight: 700;
+        letter-spacing: 0;
+        margin-bottom: 12px;
+      }
+
+      h1 {
+        font-size: clamp(34px, 7vw, 68px);
+        line-height: 1.02;
+        letter-spacing: 0;
+        margin: 0 0 18px;
+      }
+
+      .lead {
+        max-width: 760px;
+        color: var(--muted);
+        font-size: 19px;
+        line-height: 1.7;
+        margin: 0 0 28px;
+      }
+
+      .actions {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 12px;
+        margin: 0 0 42px;
+      }
+
+      a.button {
+        display: inline-flex;
+        min-height: 44px;
+        align-items: center;
+        justify-content: center;
+        border: 1px solid var(--accent);
+        border-radius: 8px;
+        padding: 10px 16px;
+        color: #ffffff;
+        background: var(--accent);
+        text-decoration: none;
+        font-weight: 700;
+      }
+
+      a.button.secondary {
+        color: var(--accent-dark);
+        background: #ffffff;
+      }
+
+      section {
+        border-top: 1px solid var(--line);
+        padding: 28px 0;
+      }
+
+      h2 {
+        font-size: 22px;
+        margin: 0 0 14px;
+      }
+
+      p,
+      li {
+        color: var(--muted);
+        font-size: 16px;
+        line-height: 1.75;
+      }
+
+      ul {
+        margin: 0;
+        padding-left: 20px;
+      }
+
+      code {
+        border: 1px solid var(--line);
+        border-radius: 6px;
+        padding: 2px 6px;
+        background: var(--panel);
+        color: var(--ink);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <div class="eyebrow">Seedance 2.0 internal tool</div>
+      <h1>兔狲视频生成器</h1>
+      <p class="lead">
+        这是火山方舟 Seedance 2.0 的内部测试与部署入口。核心代码已经保存到 GitHub，后端支持文生视频、图生视频、视频生视频、真人肖像 Asset 授权、TOS 外链上传、任务轮询、下载、费用估算和详细日志。
+      </p>
+      <div class="actions">
+        <a class="button" href="https://github.com/foxmuldery/seedance-web-deploy">查看 GitHub 仓库</a>
+        <a class="button secondary" href="https://github.com/foxmuldery/seedance-web-deploy/blob/main/%E5%85%94%E7%8B%B2%E8%A7%86%E9%A2%91%E7%94%9F%E6%88%90%E5%99%A8_%E7%BD%91%E7%AB%99%E9%83%A8%E7%BD%B2%E8%AF%B4%E6%98%8E.md">部署说明</a>
+      </div>
+
+      <section>
+        <h2>当前上线状态</h2>
+        <p>
+          Cloudflare Pages 已作为公网入口发布。当前页面是安全入口页，不包含火山方舟或 TOS 密钥。真正的视频生成后端需要运行在服务器上，再通过 Cloudflare Tunnel 或反向代理接入。
+        </p>
+      </section>
+
+      <section>
+        <h2>推荐部署结构</h2>
+        <ul>
+          <li>GitHub 保存核心代码和 Docker 部署文件。</li>
+          <li>服务器运行 Python 后端和持久输出目录。</li>
+          <li>Cloudflare 负责域名、HTTPS、访问权限和公网入口。</li>
+          <li>密钥只放服务器环境变量，不写入前端、不提交 GitHub。</li>
+        </ul>
+      </section>
+
+      <section>
+        <h2>服务器启动命令</h2>
+        <p>
+          在服务器填写 <code>.env.seedance-web</code> 后运行 <code>docker compose -f docker-compose.seedance-web.yml up -d --build</code>。
+        </p>
+      </section>
+    </main>
+  </body>
+</html>
