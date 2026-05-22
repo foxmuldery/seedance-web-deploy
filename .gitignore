@@ -8,6 +8,7 @@ __pycache__/
 .env.*
 !.env.seedance-web.example
 .seedance_web_config.json
+server_console_paste_env_command.txt
 
 seedance_web_outputs/
 seedance_web_logs/
