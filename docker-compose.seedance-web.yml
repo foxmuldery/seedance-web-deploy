@@ -1,0 +1,17 @@
+name: seedance-web
+
+services:
+  seedance-web:
+    build:
+      context: .
+      dockerfile: Dockerfile.seedance-web
+    env_file:
+      - ${SEEDANCE_ENV_FILE:-.env.seedance-web}
+    ports:
+      - "8080:8080"
+    volumes:
+      - seedance-web-data:/data
+    restart: unless-stopped
+
+volumes:
+  seedance-web-data:

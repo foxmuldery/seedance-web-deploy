@@ -1,0 +1,17 @@
+.DS_Store
+.venv/
+__pycache__/
+*.pyc
+
+.env
+.env.*
+!.env.seedance-web.example
+.seedance_web_config.json
+
+seedance_web_outputs/
+seedance_web_logs/
+_logs/
+*.mp4
+*.mov
+*.webm
+*.zip
