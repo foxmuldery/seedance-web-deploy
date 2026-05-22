@@ -35,3 +35,14 @@ http://服务器IP:8080/
 当前版本是带后端的 Python 工具，推荐先部署到服务器，再用 Cloudflare Tunnel / Access 暴露域名和权限控制。
 
 不建议把密钥写入前端，也不要把 `.env.seedance-web`、`.seedance_web_config.json`、输出视频、日志文件提交到 GitHub。
+
+## 访问密码
+
+在 `.env.seedance-web` 中设置：
+
+```bash
+SEEDANCE_WEB_USERNAME=tusun
+SEEDANCE_WEB_PASSWORD=你的访问密码
+```
+
+设置后，网页和所有 API 都会要求浏览器输入用户名和密码。不要把 `.env.seedance-web` 提交到 GitHub。

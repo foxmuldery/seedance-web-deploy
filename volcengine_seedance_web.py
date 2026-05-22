@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import base64
 import hashlib
+import hmac
 import importlib
 import io
 from datetime import datetime, UTC
@@ -52,6 +53,9 @@ DEFAULT_TOS_REGION = os.getenv("TOS_REGION", "cn-beijing")
 DEFAULT_TOS_PREFIX = os.getenv("TOS_PREFIX", "seedance-inputs")
 DEFAULT_TOS_TIMEOUT = int(os.getenv("TOS_REQUEST_TIMEOUT", "300"))
 MAX_TOS_UPLOAD_BYTES = int(os.getenv("SEEDANCE_MAX_TOS_UPLOAD_BYTES", str(30 * 1024 * 1024)))
+WEB_AUTH_USERNAME = os.getenv("SEEDANCE_WEB_USERNAME", "tusun")
+WEB_AUTH_PASSWORD = os.getenv("SEEDANCE_WEB_PASSWORD", "")
+WEB_AUTH_REALM = os.getenv("SEEDANCE_WEB_AUTH_REALM", "Tusun Seedance")
 TERMINAL_SUCCESS = {"succeeded", "completed", "success"}
 TERMINAL_FAILURE = {"failed", "cancelled", "canceled", "expired"}
 
@@ -2333,6 +2337,25 @@ def send_json(handler: BaseHTTPRequestHandler, data: Any, status: int = 200) -> 
     handler.wfile.write(raw)
 
 
+def auth_enabled() -> bool:
+    return bool(WEB_AUTH_PASSWORD)
+
+
+def valid_basic_auth(header: str | None) -> bool:
+    if not auth_enabled():
+        return True
+    if not header or not header.startswith("Basic "):
+        return False
+    try:
+        decoded = base64.b64decode(header.removeprefix("Basic ").strip()).decode("utf-8")
+    except Exception:
+        return False
+    username, sep, password = decoded.partition(":")
+    if not sep:
+        return False
+    return hmac.compare_digest(username, WEB_AUTH_USERNAME) and hmac.compare_digest(password, WEB_AUTH_PASSWORD)
+
+
 def send_text(handler: BaseHTTPRequestHandler, text: str, content_type: str = "text/html; charset=utf-8") -> None:
     raw = text.encode("utf-8")
     handler.send_response(HTTPStatus.OK)
@@ -2968,8 +2991,21 @@ class Handler(BaseHTTPRequestHandler):
     def log_message(self, format: str, *args: Any) -> None:
         print(f"[{now_iso()}] {self.address_string()} {format % args}")
 
+    def ensure_authorized(self) -> bool:
+        if valid_basic_auth(self.headers.get("Authorization")):
+            return True
+        log_event("auth.denied", path=urlparse(self.path).path, client=self.address_string())
+        self.send_response(HTTPStatus.UNAUTHORIZED)
+        self.send_header("WWW-Authenticate", f'Basic realm="{WEB_AUTH_REALM}", charset="UTF-8"')
+        self.send_header("Content-Type", "text/plain; charset=utf-8")
+        self.end_headers()
+        self.wfile.write("Authentication required".encode("utf-8"))
+        return False
+
     def do_GET(self) -> None:
         try:
+            if not self.ensure_authorized():
+                return
             parsed = urlparse(self.path)
             path = parsed.path
             if path.startswith("/api/"):
@@ -3024,6 +3060,8 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_POST(self) -> None:
         try:
+            if not self.ensure_authorized():
+                return
             parsed = urlparse(self.path)
             path = parsed.path
             if path.startswith("/api/"):
@@ -3122,6 +3160,10 @@ def main() -> int:
         print("API key: loaded from environment")
     else:
         print("API key: not set in environment; enter it in the web page")
+    if auth_enabled():
+        print(f"Web auth: enabled for user {WEB_AUTH_USERNAME}")
+    else:
+        print("Web auth: disabled; set SEEDANCE_WEB_PASSWORD to require login")
     try:
         server.serve_forever()
     except KeyboardInterrupt:
