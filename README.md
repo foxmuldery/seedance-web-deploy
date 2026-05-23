@@ -42,7 +42,16 @@ http://服务器IP:8080/
 
 ```bash
 SEEDANCE_WEB_USERNAME=tusun
+SEEDANCE_WEB_ALLOW_ANY_USERNAME=1
 SEEDANCE_WEB_PASSWORD=你的访问密码
 ```
 
-设置后，网页和所有 API 都会要求浏览器输入用户名和密码。不要把 `.env.seedance-web` 提交到 GitHub。
+设置后，网页和所有 API 都会要求浏览器输入用户名和密码。`SEEDANCE_WEB_ALLOW_ANY_USERNAME=1` 表示用户名可以让同事自己填写，后端只校验共享密码，并把用户名写入日志用于统计。
+
+如果需要恢复固定用户名校验，设置：
+
+```bash
+SEEDANCE_WEB_ALLOW_ANY_USERNAME=0
+```
+
+不要把 `.env.seedance-web` 提交到 GitHub。

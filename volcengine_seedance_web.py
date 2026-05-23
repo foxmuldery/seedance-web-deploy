@@ -55,6 +55,7 @@ DEFAULT_TOS_TIMEOUT = int(os.getenv("TOS_REQUEST_TIMEOUT", "300"))
 MAX_TOS_UPLOAD_BYTES = int(os.getenv("SEEDANCE_MAX_TOS_UPLOAD_BYTES", str(30 * 1024 * 1024)))
 WEB_AUTH_USERNAME = os.getenv("SEEDANCE_WEB_USERNAME", "tusun")
 WEB_AUTH_PASSWORD = os.getenv("SEEDANCE_WEB_PASSWORD", "")
+WEB_AUTH_ALLOW_ANY_USERNAME = os.getenv("SEEDANCE_WEB_ALLOW_ANY_USERNAME", "1").strip().lower() not in {"0", "false", "no", "off"}
 WEB_AUTH_REALM = os.getenv("SEEDANCE_WEB_AUTH_REALM", "Tusun Seedance")
 TERMINAL_SUCCESS = {"succeeded", "completed", "success"}
 TERMINAL_FAILURE = {"failed", "cancelled", "canceled", "expired"}
@@ -2341,19 +2342,24 @@ def auth_enabled() -> bool:
     return bool(WEB_AUTH_PASSWORD)
 
 
-def valid_basic_auth(header: str | None) -> bool:
+def basic_auth_user(header: str | None) -> str | None:
     if not auth_enabled():
-        return True
+        return ""
     if not header or not header.startswith("Basic "):
-        return False
+        return None
     try:
         decoded = base64.b64decode(header.removeprefix("Basic ").strip()).decode("utf-8")
     except Exception:
-        return False
+        return None
     username, sep, password = decoded.partition(":")
-    if not sep:
-        return False
-    return hmac.compare_digest(username, WEB_AUTH_USERNAME) and hmac.compare_digest(password, WEB_AUTH_PASSWORD)
+    username = username.strip()
+    if not sep or not username:
+        return None
+    if not hmac.compare_digest(password, WEB_AUTH_PASSWORD):
+        return None
+    if not WEB_AUTH_ALLOW_ANY_USERNAME and not hmac.compare_digest(username, WEB_AUTH_USERNAME):
+        return None
+    return username
 
 
 def send_text(handler: BaseHTTPRequestHandler, text: str, content_type: str = "text/html; charset=utf-8") -> None:
@@ -2393,6 +2399,7 @@ def create_task(body: dict[str, Any]) -> dict[str, Any]:
         raise RuntimeError("Missing content")
     request_timeout = int(body.get("requestTimeout") or DEFAULT_REQUEST_TIMEOUT)
     request_timeout = max(30, min(request_timeout, 1800))
+    auth_user = str(body.get("_authUser") or "").strip()
 
     run_id = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
     output_root = output_root_from_body(body)
@@ -2406,6 +2413,7 @@ def create_task(body: dict[str, Any]) -> dict[str, Any]:
         model=payload.get("model"),
         request_timeout=request_timeout,
         content_count=len(payload.get("content") or []),
+        auth_user=auth_user,
         payload=payload,
     )
 
@@ -2418,6 +2426,7 @@ def create_task(body: dict[str, Any]) -> dict[str, Any]:
             "model": payload.get("model"),
             "output_root": str(output_root),
             "request_timeout": request_timeout,
+            "auth_user": auth_user,
             "request_payload_bytes": len(json.dumps(payload, ensure_ascii=False).encode("utf-8")),
         },
     )
@@ -2452,6 +2461,7 @@ def create_task(body: dict[str, Any]) -> dict[str, Any]:
         "request_timeout": request_timeout,
         "output_dir": str(output_dir),
         "created_at": time.time(),
+        "auth_user": auth_user,
         "latest": response,
         "video_url": find_video_url(response),
     }
@@ -2992,7 +3002,9 @@ class Handler(BaseHTTPRequestHandler):
         print(f"[{now_iso()}] {self.address_string()} {format % args}")
 
     def ensure_authorized(self) -> bool:
-        if valid_basic_auth(self.headers.get("Authorization")):
+        auth_user = basic_auth_user(self.headers.get("Authorization"))
+        if auth_user is not None:
+            self.auth_user = auth_user
             return True
         log_event("auth.denied", path=urlparse(self.path).path, client=self.address_string())
         self.send_response(HTTPStatus.UNAUTHORIZED)
@@ -3006,10 +3018,11 @@ class Handler(BaseHTTPRequestHandler):
         try:
             if not self.ensure_authorized():
                 return
+            auth_user = getattr(self, "auth_user", "")
             parsed = urlparse(self.path)
             path = parsed.path
             if path.startswith("/api/"):
-                log_event("http.request", method="GET", path=path, client=self.address_string())
+                log_event("http.request", method="GET", path=path, client=self.address_string(), auth_user=auth_user)
             if path == "/":
                 send_text(self, HTML)
                 return
@@ -3062,12 +3075,16 @@ class Handler(BaseHTTPRequestHandler):
         try:
             if not self.ensure_authorized():
                 return
+            auth_user = getattr(self, "auth_user", "")
             parsed = urlparse(self.path)
             path = parsed.path
             if path.startswith("/api/"):
-                log_event("http.request", method="POST", path=path, client=self.address_string())
+                log_event("http.request", method="POST", path=path, client=self.address_string(), auth_user=auth_user)
             if path == "/api/tasks":
-                send_json(self, create_task(read_json_body(self)))
+                body = read_json_body(self)
+                if auth_user:
+                    body["_authUser"] = auth_user
+                send_json(self, create_task(body))
                 return
             if path == "/api/tos/check":
                 send_json(self, check_tos(read_json_body(self)))
@@ -3161,7 +3178,10 @@ def main() -> int:
     else:
         print("API key: not set in environment; enter it in the web page")
     if auth_enabled():
-        print(f"Web auth: enabled for user {WEB_AUTH_USERNAME}")
+        if WEB_AUTH_ALLOW_ANY_USERNAME:
+            print("Web auth: enabled; any non-empty username is accepted with the shared password")
+        else:
+            print(f"Web auth: enabled for user {WEB_AUTH_USERNAME}")
     else:
         print("Web auth: disabled; set SEEDANCE_WEB_PASSWORD to require login")
     try:
