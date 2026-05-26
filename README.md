@@ -55,3 +55,16 @@ SEEDANCE_WEB_ALLOW_ANY_USERNAME=0
 ```
 
 不要把 `.env.seedance-web` 提交到 GitHub。
+
+## 统一用量上报
+
+视频生成器会把 Seedance 任务提交、状态查询和下载写入兔狲后期助手统一账本：
+
+```bash
+TSUN_USAGE_ENDPOINT=https://voice.bianjuziyuan.com/api/usage/events
+TSUN_USAGE_INGEST_TOKEN=统一上报Token
+TSUN_APP_ID=video_generator
+TSUN_USAGE_PROVIDER=seedance
+```
+
+`TSUN_USAGE_INGEST_TOKEN` 未配置时不会阻断生成流程；本地调试可把 `TSUN_USAGE_ENDPOINT` 指到 `http://127.0.0.1:5183/api/usage/events`。

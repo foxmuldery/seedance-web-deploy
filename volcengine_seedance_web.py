@@ -57,6 +57,12 @@ WEB_AUTH_USERNAME = os.getenv("SEEDANCE_WEB_USERNAME", "tusun")
 WEB_AUTH_PASSWORD = os.getenv("SEEDANCE_WEB_PASSWORD", "")
 WEB_AUTH_ALLOW_ANY_USERNAME = os.getenv("SEEDANCE_WEB_ALLOW_ANY_USERNAME", "1").strip().lower() not in {"0", "false", "no", "off"}
 WEB_AUTH_REALM = os.getenv("SEEDANCE_WEB_AUTH_REALM", "Tusun Seedance")
+TSUN_USAGE_ENDPOINT = os.getenv("TSUN_USAGE_ENDPOINT", "https://voice.bianjuziyuan.com/api/usage/events").strip()
+TSUN_USAGE_INGEST_TOKEN = os.getenv("TSUN_USAGE_INGEST_TOKEN", "").strip()
+TSUN_APP_ID = os.getenv("TSUN_APP_ID", "video_generator").strip() or "video_generator"
+TSUN_APP_LABEL = os.getenv("TSUN_APP_LABEL", "兔狲视频生成器").strip() or "兔狲视频生成器"
+TSUN_USAGE_PROVIDER = os.getenv("TSUN_USAGE_PROVIDER", "seedance").strip() or "seedance"
+TSUN_USAGE_PROVIDER_LABEL = os.getenv("TSUN_USAGE_PROVIDER_LABEL", "Volcengine Seedance").strip() or "Volcengine Seedance"
 TERMINAL_SUCCESS = {"succeeded", "completed", "success"}
 TERMINAL_FAILURE = {"failed", "cancelled", "canceled", "expired"}
 
@@ -671,6 +677,35 @@ HTML = r"""<!doctype html>
             <button type="button" data-mode="mixed">混合参考</button>
           </div>
 
+          <div class="drop">
+            <div class="status-line">
+              <strong>项目预设</strong>
+              <span id="presetBadge" class="badge">可手动修改</span>
+            </div>
+            <div class="grid-2">
+              <label>
+                选择预设
+                <select id="projectPreset"></select>
+              </label>
+              <label>
+                当前项目名
+                <input id="projectPresetName" placeholder="例如：怪奇实录竖版宣传" />
+              </label>
+            </div>
+            <label>
+              项目共享提示词
+              <textarea id="sharedPrompt" placeholder="统一风格、角色、镜头、禁止项；会自动拼到本次提示词前面。"></textarea>
+            </label>
+            <div class="status-line">
+              <button id="applyPresetBtn" class="button" type="button">应用预设</button>
+              <button id="savePresetBtn" class="button" type="button">保存当前为预设</button>
+              <button id="deletePresetBtn" class="button danger" type="button">删除自定义预设</button>
+            </div>
+            <div class="hint">
+              预设会统一模式、画幅、分辨率、时长和共享提示词；应用后所有字段仍可手动修改。
+            </div>
+          </div>
+
           <label>
             API Key
             <input id="apiKey" type="password" autocomplete="off" placeholder="留空则使用 ARK_API_KEY 环境变量" />
@@ -1051,6 +1086,49 @@ HTML = r"""<!doctype html>
       video: "视频生视频",
       mixed: "混合参考",
     };
+    const customPresetStorageKey = "seedanceProjectPresets";
+    const builtInProjectPresets = [
+      {
+        id: "default_landscape",
+        label: "横版预览",
+        mode: "text",
+        ratio: "16:9",
+        resolution: "720p",
+        duration: "10",
+        model: "doubao-seedance-2-0-fast-260128",
+        sharedPrompt: "写实电影质感，镜头稳定，画面干净，不要字幕，不要水印，不要卡通风格。",
+      },
+      {
+        id: "vertical_social",
+        label: "竖版短视频",
+        mode: "text",
+        ratio: "9:16",
+        resolution: "720p",
+        duration: "10",
+        model: "doubao-seedance-2-0-fast-260128",
+        sharedPrompt: "竖版短视频构图，主体明确，第一秒有动作钩子，镜头运动克制，不要字幕，不要水印。",
+      },
+      {
+        id: "documentary_empty_shot",
+        label: "纪录片空镜",
+        mode: "text",
+        ratio: "16:9",
+        resolution: "720p",
+        duration: "10",
+        model: "doubao-seedance-2-0-fast-260128",
+        sharedPrompt: "纪录片真实空镜，自然光，轻微环境运动，镜头稳定，画面克制，不要人物正脸，不要文字。",
+      },
+      {
+        id: "image_reference",
+        label: "图生视频统一风格",
+        mode: "image",
+        ratio: "16:9",
+        resolution: "720p",
+        duration: "10",
+        model: "doubao-seedance-2-0-fast-260128",
+        sharedPrompt: "保持参考图主体、构图和风格一致，只增加自然动作和轻微镜头运动，不要改变角色身份，不要新增文字。",
+      },
+    ];
 
     function setBadge(el, text, cls = "") {
       el.className = "badge" + (cls ? " " + cls : "");
@@ -1467,9 +1545,127 @@ HTML = r"""<!doctype html>
       return uploadLocalMedia(fileKey);
     }
 
+    function loadCustomProjectPresets() {
+      try {
+        const raw = localStorage.getItem(customPresetStorageKey);
+        const presets = raw ? JSON.parse(raw) : [];
+        return Array.isArray(presets) ? presets.filter((item) => item && item.id && item.label) : [];
+      } catch (_) {
+        return [];
+      }
+    }
+
+    function saveCustomProjectPresets(presets) {
+      localStorage.setItem(customPresetStorageKey, JSON.stringify(presets.slice(0, 30)));
+    }
+
+    function allProjectPresets() {
+      return [...builtInProjectPresets, ...loadCustomProjectPresets()];
+    }
+
+    function renderProjectPresetOptions(selectedId = "") {
+      const select = $("projectPreset");
+      select.innerHTML = "";
+      for (const preset of allProjectPresets()) {
+        const option = document.createElement("option");
+        option.value = preset.id;
+        option.textContent = preset.custom ? `自定义：${preset.label}` : preset.label;
+        select.append(option);
+      }
+      if (selectedId && [...select.options].some((option) => option.value === selectedId)) {
+        select.value = selectedId;
+      }
+    }
+
+    function selectedProjectPreset() {
+      const id = $("projectPreset").value;
+      return allProjectPresets().find((preset) => preset.id === id) || null;
+    }
+
+    function setSelectValue(id, value) {
+      const el = $(id);
+      if ([...el.options].some((option) => option.value === String(value))) {
+        el.value = String(value);
+      }
+    }
+
+    function applyProjectPreset(preset = selectedProjectPreset()) {
+      if (!preset) return;
+      $("projectPresetName").value = preset.label || "";
+      setMode(preset.mode || "text");
+      setSelectValue("ratio", preset.ratio || "16:9");
+      setSelectValue("resolution", preset.resolution ?? "720p");
+      setSelectValue("duration", preset.duration || "5");
+      if (preset.model) {
+        if ([...$("modelPreset").options].some((option) => option.value === preset.model)) {
+          $("modelPreset").value = preset.model;
+          $("modelCustom").disabled = true;
+        } else {
+          $("modelPreset").value = "custom";
+          $("modelCustom").disabled = false;
+          $("modelCustom").value = preset.model;
+        }
+      }
+      $("sharedPrompt").value = preset.sharedPrompt || "";
+      setBadge($("presetBadge"), "已应用，可手动修改", "ok");
+      addLog("已应用项目预设", preset.label || "");
+      previewRequest();
+    }
+
+    function currentProjectPresetFromForm(label, existingId = "") {
+      return {
+        id: existingId || `custom_${Date.now()}`,
+        label,
+        custom: true,
+        mode: state.mode,
+        ratio: $("ratio").value,
+        resolution: $("resolution").value,
+        duration: $("duration").value,
+        model: selectedModel(),
+        sharedPrompt: $("sharedPrompt").value.trim(),
+      };
+    }
+
+    function saveCurrentProjectPreset() {
+      const label = $("projectPresetName").value.trim() || prompt("预设名称")?.trim();
+      if (!label) return;
+      const currentId = $("projectPreset").value;
+      const builtIn = builtInProjectPresets.some((preset) => preset.id === currentId);
+      const existingId = builtIn ? "" : currentId;
+      const presets = loadCustomProjectPresets();
+      const next = currentProjectPresetFromForm(label, existingId);
+      const index = presets.findIndex((preset) => preset.id === next.id);
+      if (index >= 0) presets[index] = next;
+      else presets.push(next);
+      saveCustomProjectPresets(presets);
+      renderProjectPresetOptions(next.id);
+      setBadge($("presetBadge"), "自定义预设已保存", "ok");
+      addLog("已保存项目预设", label);
+    }
+
+    function deleteSelectedProjectPreset() {
+      const currentId = $("projectPreset").value;
+      if (builtInProjectPresets.some((preset) => preset.id === currentId)) {
+        setBadge($("presetBadge"), "内置预设不可删", "warn");
+        addLog("内置预设不可删除");
+        return;
+      }
+      const presets = loadCustomProjectPresets().filter((preset) => preset.id !== currentId);
+      saveCustomProjectPresets(presets);
+      renderProjectPresetOptions();
+      applyProjectPreset(selectedProjectPreset());
+      setBadge($("presetBadge"), "自定义预设已删除", "warn");
+    }
+
+    function promptTextWithSharedPrompt() {
+      const shared = $("sharedPrompt").value.trim();
+      const prompt = $("prompt").value.trim();
+      return [shared, prompt].filter(Boolean).join("\n\n");
+    }
+
     async function buildPayload() {
       const content = [];
-      const prompt = $("prompt").value.trim();
+      const prompt = promptTextWithSharedPrompt();
       if (prompt) content.push({ type: "text", text: prompt });
 
       const image = await mediaValueForPayload("imageUrl", "image");
@@ -1516,6 +1712,26 @@ HTML = r"""<!doctype html>
 
     function outputRootValue() {
       return $("outputRoot").value.trim();
+    }
+
+    function currentUploadBytes() {
+      return Object.values(state.fileMeta || {}).reduce((sum, meta) => sum + Number(meta?.size || 0), 0);
+    }
+
+    function clientUsageMeta(payload) {
+      const content = Array.isArray(payload?.content) ? payload.content : [];
+      return {
+        mode: state.mode,
+        duration: Number($("duration").value || payload?.duration || 0),
+        resolution: $("resolution").value || payload?.resolution || "",
+        ratio: $("ratio").value || payload?.ratio || "",
+        uploadBytes: currentUploadBytes(),
+        contentCount: content.length,
+        hasImageInput: content.some((item) => item?.type === "image_url"),
+        hasVideoInput: hasVideoInput(payload),
+        hasAudioInput: content.some((item) => item?.type === "audio_url"),
+        generateAudio: Boolean(payload?.generate_audio),
+      };
     }
 
     function displayJson(tab = state.activeTab) {
@@ -1607,6 +1823,7 @@ HTML = r"""<!doctype html>
           requestTimeout: Math.max(30, Number($("requestTimeout").value || 300)),
           outputRoot: outputRootValue(),
           payload,
+          usageMeta: clientUsageMeta(payload),
         });
 
         state.runId = data.runId;
@@ -2020,6 +2237,15 @@ HTML = r"""<!doctype html>
       $("modelCustom").disabled = $("modelPreset").value !== "custom";
       if (!$("modelCustom").disabled) $("modelCustom").focus();
     });
+    $("projectPreset").addEventListener("change", () => {
+      const preset = selectedProjectPreset();
+      $("projectPresetName").value = preset?.label || "";
+      $("sharedPrompt").value = preset?.sharedPrompt || "";
+      setBadge($("presetBadge"), "待应用", "warn");
+    });
+    $("applyPresetBtn").addEventListener("click", () => applyProjectPreset());
+    $("savePresetBtn").addEventListener("click", saveCurrentProjectPreset);
+    $("deletePresetBtn").addEventListener("click", deleteSelectedProjectPreset);
     $("previewBtn").addEventListener("click", previewRequest);
     $("runBtn").addEventListener("click", startTask);
     $("checkConnectionBtn").addEventListener("click", checkConnection);
@@ -2051,7 +2277,9 @@ HTML = r"""<!doctype html>
     bindFile("videoFile", "video");
     bindFile("audioFile", "audio");
 
-    setMode("text");
+    renderProjectPresetOptions();
+    applyProjectPreset(selectedProjectPreset());
+    setMode(state.mode);
     setTosLocked(false);
     updatePortraitBadge();
     loadConfig();
@@ -2188,6 +2416,150 @@ def log_event(event: str, run_id: str | None = None, output_dir: Path | str | No
         append_jsonl(LOG_DIR / "seedance_web_events.jsonl", record)
         if output_dir:
             append_jsonl(Path(output_dir) / "events.jsonl", record)
+
+
+def usage_endpoint_is_local(endpoint: str) -> bool:
+    try:
+        host = urlparse(endpoint).hostname or ""
+    except Exception:
+        return False
+    return host in {"localhost", "127.0.0.1", "::1"}
+
+
+def count_usage_chars(value: Any) -> int:
+    return len(str(value or ""))
+
+
+def usage_metric(value: Any, fallback: float = 0) -> float:
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return fallback
+    return number if number >= 0 else fallback
+
+
+def payload_text_chars(payload: dict[str, Any] | None) -> int:
+    if not isinstance(payload, dict):
+        return 0
+    total = 0
+    content = payload.get("content")
+    if isinstance(content, list):
+        for item in content:
+            if isinstance(item, dict) and item.get("type") == "text":
+                total += count_usage_chars(item.get("text"))
+    return total
+
+
+def response_bytes(value: Any) -> int:
+    if value is None:
+        return 0
+    try:
+        return len(json.dumps(value, ensure_ascii=False, default=str).encode("utf-8"))
+    except Exception:
+        return count_usage_chars(value)
+
+
+def clean_usage_meta_value(value: Any) -> str | int | float | bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return value
+    return str(value or "")[:200]
+
+
+def usage_meta_from_body(body: dict[str, Any]) -> dict[str, Any]:
+    meta = body.get("usageMeta")
+    return meta if isinstance(meta, dict) else {}
+
+
+def video_usage_event(
+    auth_user: str | None,
+    operation: str,
+    *,
+    payload: dict[str, Any] | None = None,
+    usage_meta: dict[str, Any] | None = None,
+    response: Any = None,
+    task_id: str = "",
+    run_id: str = "",
+    success: bool = True,
+    status_code: str = "",
+    error: str = "",
+    upload_bytes: Any = None,
+    response_size: Any = None,
+) -> dict[str, Any]:
+    usage_meta = usage_meta if isinstance(usage_meta, dict) else {}
+    payload = payload if isinstance(payload, dict) else {}
+    model = str(payload.get("model") or "")
+    video_seconds = usage_metric(usage_meta.get("duration") or payload.get("duration"))
+    upload_total = usage_metric(upload_bytes if upload_bytes is not None else usage_meta.get("uploadBytes"))
+    response_total = usage_metric(response_size if response_size is not None else response_bytes(response))
+    meta: dict[str, Any] = {
+        "mode": usage_meta.get("mode", ""),
+        "resolution": usage_meta.get("resolution") or payload.get("resolution") or "",
+        "ratio": usage_meta.get("ratio") or payload.get("ratio") or "",
+        "taskId": task_id,
+        "runId": run_id,
+        "contentCount": usage_meta.get("contentCount", 0),
+        "hasImageInput": usage_meta.get("hasImageInput", False),
+        "hasVideoInput": usage_meta.get("hasVideoInput", False),
+        "hasAudioInput": usage_meta.get("hasAudioInput", False),
+        "generateAudio": usage_meta.get("generateAudio", False),
+    }
+    if isinstance(response, dict):
+        status = get_status(response)
+        if status and status != "unknown":
+            meta["status"] = status
+        usage = response.get("usage")
+        if isinstance(usage, dict):
+            tokens = usage.get("total_tokens") or usage.get("tokens")
+            if tokens is not None:
+                meta["usageTokens"] = usage_metric(tokens)
+    clean_meta = {key: clean_usage_meta_value(value) for key, value in meta.items() if value not in ("", None)}
+    return {
+        "appId": TSUN_APP_ID,
+        "appLabel": TSUN_APP_LABEL,
+        "username": auth_user or "未登记",
+        "tool": TSUN_APP_LABEL,
+        "provider": TSUN_USAGE_PROVIDER,
+        "providerLabel": TSUN_USAGE_PROVIDER_LABEL,
+        "operation": operation,
+        "model": model,
+        "requestCount": 1,
+        "inputChars": payload_text_chars(payload),
+        "videoSeconds": video_seconds,
+        "uploadBytes": upload_total,
+        "responseBytes": response_total,
+        "success": success,
+        "statusCode": str(status_code or "")[:20],
+        "error": str(error or "")[:220],
+        "meta": clean_meta,
+        "source": "seedance-web",
+    }
+
+
+def report_tsun_usage(event: dict[str, Any], run_id: str | None = None, output_dir: Path | str | None = None) -> bool:
+    if not TSUN_USAGE_ENDPOINT:
+        return False
+    if not TSUN_USAGE_INGEST_TOKEN and not usage_endpoint_is_local(TSUN_USAGE_ENDPOINT):
+        log_event("usage.report.skipped", run_id=run_id, output_dir=output_dir, reason="missing TSUN_USAGE_INGEST_TOKEN", operation=event.get("operation"))
+        return False
+    headers = {"Content-Type": "application/json"}
+    if TSUN_USAGE_INGEST_TOKEN:
+        headers["X-Tsun-Usage-Token"] = TSUN_USAGE_INGEST_TOKEN
+    request = Request(
+        TSUN_USAGE_ENDPOINT,
+        data=json.dumps(event, ensure_ascii=False).encode("utf-8"),
+        method="POST",
+        headers=headers,
+    )
+    try:
+        with urlopen(request, timeout=8) as response:
+            response.read()
+        log_event("usage.report.ok", run_id=run_id, output_dir=output_dir, operation=event.get("operation"), success=event.get("success"))
+        return True
+    except Exception as exc:
+        log_event("usage.report.error", run_id=run_id, output_dir=output_dir, operation=event.get("operation"), error=str(exc))
+        return False
 
 
 def resolve_output_root(value: Any = None) -> Path:
@@ -2386,20 +2758,33 @@ def create_task(body: dict[str, Any]) -> dict[str, Any]:
     output_dir: Path | None = None
     run_id = ""
     api_key = (body.get("apiKey") or "").strip() or load_server_api_key()
-    if not api_key:
-        raise RuntimeError("Missing API Key. Set ARK_API_KEY before starting the server, or enter it in the page.")
-
     base_url = normalize_base_url(body.get("baseUrl") or DEFAULT_BASE_URL)
     payload = body.get("payload")
+    auth_user = str(body.get("_authUser") or "").strip()
+    usage_meta = usage_meta_from_body(body)
     if not isinstance(payload, dict):
+        report_tsun_usage(
+            video_usage_event(auth_user, "video_generation", payload={}, usage_meta=usage_meta, success=False, error="Missing payload")
+        )
         raise RuntimeError("Missing payload")
     if not payload.get("model"):
+        report_tsun_usage(
+            video_usage_event(auth_user, "video_generation", payload=payload, usage_meta=usage_meta, success=False, error="Missing model")
+        )
         raise RuntimeError("Missing model")
     if not payload.get("content"):
+        report_tsun_usage(
+            video_usage_event(auth_user, "video_generation", payload=payload, usage_meta=usage_meta, success=False, error="Missing content")
+        )
         raise RuntimeError("Missing content")
+    if not api_key:
+        report_tsun_usage(
+            video_usage_event(auth_user, "video_generation", payload=payload, usage_meta=usage_meta, success=False, error="Missing API Key")
+        )
+        raise RuntimeError("Missing API Key. Set ARK_API_KEY before starting the server, or enter it in the page.")
+
     request_timeout = int(body.get("requestTimeout") or DEFAULT_REQUEST_TIMEOUT)
     request_timeout = max(30, min(request_timeout, 1800))
-    auth_user = str(body.get("_authUser") or "").strip()
 
     run_id = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
     output_root = output_root_from_body(body)
@@ -2415,6 +2800,7 @@ def create_task(body: dict[str, Any]) -> dict[str, Any]:
         content_count=len(payload.get("content") or []),
         auth_user=auth_user,
         payload=payload,
+        usage_meta=usage_meta,
     )
 
     write_json(output_dir / "request_payload.json", payload)
@@ -2428,6 +2814,7 @@ def create_task(body: dict[str, Any]) -> dict[str, Any]:
             "request_timeout": request_timeout,
             "auth_user": auth_user,
             "request_payload_bytes": len(json.dumps(payload, ensure_ascii=False).encode("utf-8")),
+            "usage_meta": usage_meta,
         },
     )
 
@@ -2441,6 +2828,18 @@ def create_task(body: dict[str, Any]) -> dict[str, Any]:
         )
     except Exception as exc:
         log_event("task.create.error", run_id=run_id, output_dir=output_dir, error=str(exc))
+        report_tsun_usage(
+            video_usage_event(
+                auth_user,
+                "video_generation",
+                payload=payload,
+                usage_meta=usage_meta,
+                success=False,
+                error=str(exc),
+            ),
+            run_id,
+            output_dir,
+        )
         raise
     task_id = extract_task_id(response)
     write_json(output_dir / "create_response.json", response)
@@ -2453,6 +2852,19 @@ def create_task(body: dict[str, Any]) -> dict[str, Any]:
         response=response,
     )
 
+    report_tsun_usage(
+        video_usage_event(
+            auth_user,
+            "video_generation",
+            payload=payload,
+            usage_meta=usage_meta,
+            response=response,
+            task_id=task_id,
+            run_id=run_id,
+        ),
+        run_id,
+        output_dir,
+    )
     task = {
         "run_id": run_id,
         "task_id": task_id,
@@ -2463,6 +2875,8 @@ def create_task(body: dict[str, Any]) -> dict[str, Any]:
         "created_at": time.time(),
         "auth_user": auth_user,
         "latest": response,
+        "payload": payload,
+        "usage_meta": usage_meta,
         "video_url": find_video_url(response),
     }
     with TASK_LOCK:
@@ -2517,6 +2931,22 @@ def poll_task(run_id: str) -> dict[str, Any]:
         usage=response.get("usage") if isinstance(response, dict) else None,
         response=response,
     )
+    report_tsun_usage(
+        video_usage_event(
+            task.get("auth_user"),
+            "video_status",
+            payload=task.get("payload"),
+            usage_meta=task.get("usage_meta"),
+            response=response,
+            task_id=task["task_id"],
+            run_id=run_id,
+            success=status not in TERMINAL_FAILURE,
+            status_code=status,
+            error=status if status in TERMINAL_FAILURE else "",
+        ),
+        run_id,
+        task["output_dir"],
+    )
     return {
         "runId": run_id,
         "taskId": task["task_id"],
@@ -2548,11 +2978,43 @@ def download_task_video(run_id: str) -> dict[str, Any]:
     target = output_dir / filename
     log_event("task.download.start", run_id=run_id, output_dir=output_dir, task_id=task["task_id"], target=str(target), video_url=video_url)
     request = Request(video_url, headers={"User-Agent": "volcengine-seedance-web-test/1.0"})
-    with urlopen(request, timeout=180) as response:
-        target.write_bytes(response.read())
+    try:
+        with urlopen(request, timeout=180) as response:
+            target.write_bytes(response.read())
+    except Exception as exc:
+        log_event("task.download.error", run_id=run_id, output_dir=output_dir, task_id=task["task_id"], error=str(exc))
+        report_tsun_usage(
+            video_usage_event(
+                task.get("auth_user"),
+                "video_download",
+                payload=task.get("payload"),
+                usage_meta=task.get("usage_meta"),
+                task_id=task["task_id"],
+                run_id=run_id,
+                success=False,
+                error=str(exc),
+            ),
+            run_id,
+            output_dir,
+        )
+        raise
     register_output_dir(run_id, output_dir)
-    log_event("task.download.done", run_id=run_id, output_dir=output_dir, task_id=task["task_id"], file_path=str(target), bytes=target.stat().st_size)
+    downloaded_bytes = target.stat().st_size
+    log_event("task.download.done", run_id=run_id, output_dir=output_dir, task_id=task["task_id"], file_path=str(target), bytes=downloaded_bytes)
 
+    report_tsun_usage(
+        video_usage_event(
+            task.get("auth_user"),
+            "video_download",
+            payload=task.get("payload"),
+            usage_meta=task.get("usage_meta"),
+            task_id=task["task_id"],
+            run_id=run_id,
+            response_size=downloaded_bytes,
+        ),
+        run_id,
+        output_dir,
+    )
     return {
         "filePath": str(target),
         "fileUrl": f"/outputs/{run_id}/{filename}",
