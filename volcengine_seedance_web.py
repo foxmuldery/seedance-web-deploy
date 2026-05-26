@@ -708,7 +708,7 @@ HTML = r"""<!doctype html>
             </div>
           </div>
 
-          <label id="apiKeyField">
+          <label id="apiKeyField" class="hidden">
             API Key
             <input id="apiKey" type="password" autocomplete="off" placeholder="仅限本地调试；线上使用服务端 ARK_API_KEY" />
           </label>
