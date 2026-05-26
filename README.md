@@ -65,6 +65,15 @@ TSUN_USAGE_ENDPOINT=https://voice.bianjuziyuan.com/api/usage/events
 TSUN_USAGE_INGEST_TOKEN=统一上报Token
 TSUN_APP_ID=video_generator
 TSUN_USAGE_PROVIDER=seedance
+TSUN_STATUS_REPORT_MIN_SECONDS=60
 ```
 
 `TSUN_USAGE_INGEST_TOKEN` 未配置时不会阻断生成流程；本地调试可把 `TSUN_USAGE_ENDPOINT` 指到 `http://127.0.0.1:5183/api/usage/events`。
+
+生产环境安全要求：
+
+- `ARK_API_KEY` 只放服务端环境变量。
+- 线上页面隐藏 API Key 输入框，后端拒绝带 `apiKey` 字段的请求体。
+- `SEEDANCE_ALLOW_BROWSER_API_KEY` 生产环境保持 `0` 或不设置；只有 localhost 本地调试才允许浏览器临时 Key。
+- 用户名优先读取 Cloudflare Access 邮箱，其次才使用 Basic Auth 用户名。
+- `video_status` 入账按状态变化或 `TSUN_STATUS_REPORT_MIN_SECONDS` 间隔节流，避免状态轮询刷爆主账本。

@@ -63,3 +63,21 @@
 2. 将用户名优先绑定到 Cloudflare Access 邮箱，减少手工输入。
 3. 给状态轮询增加更细的节流与展示，避免主账本被频繁刷新记录刷屏。
 4. 为项目预设增加导入/导出 JSON，方便同事之间复用同一套项目风格配置。
+
+## 安全验收补充
+
+时间：2026-05-26
+
+1. 已隐藏生产环境 API Key 输入：线上默认不展示浏览器 Key 输入框。
+2. 已禁止线上请求体传 `apiKey`：后端检测到生产环境请求体包含 `apiKey` 字段时直接拒绝。
+3. 已改为服务端优先读取 `ARK_API_KEY`：生产环境长期 Key 不依赖浏览器输入。
+4. 已接入 Cloudflare Access 用户名优先级：优先读取 Access 邮箱，其次使用 Basic Auth 用户名。
+5. 已增加状态入账节流：`video_status` 仅在状态变化或达到 `TSUN_STATUS_REPORT_MIN_SECONDS` 间隔时写入主账本。
+
+安全回归验证：
+
+- 模拟线上 Host：`video.bianjuziyuan.com`
+- `/api/config` 返回 `allowBrowserApiKey=false`
+- 线上请求体包含 `apiKey` 时，后端拒绝请求
+- Cloudflare Access 邮箱头可进入 `authUser`
+- 不使用真实 `ARK_API_KEY`，不发起真实 Ark 生成任务

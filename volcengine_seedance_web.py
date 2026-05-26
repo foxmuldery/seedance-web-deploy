@@ -63,6 +63,8 @@ TSUN_APP_ID = os.getenv("TSUN_APP_ID", "video_generator").strip() or "video_gene
 TSUN_APP_LABEL = os.getenv("TSUN_APP_LABEL", "兔狲视频生成器").strip() or "兔狲视频生成器"
 TSUN_USAGE_PROVIDER = os.getenv("TSUN_USAGE_PROVIDER", "seedance").strip() or "seedance"
 TSUN_USAGE_PROVIDER_LABEL = os.getenv("TSUN_USAGE_PROVIDER_LABEL", "Volcengine Seedance").strip() or "Volcengine Seedance"
+TSUN_STATUS_REPORT_MIN_SECONDS = max(10, int(os.getenv("TSUN_STATUS_REPORT_MIN_SECONDS", "60")))
+SEEDANCE_ALLOW_BROWSER_API_KEY = os.getenv("SEEDANCE_ALLOW_BROWSER_API_KEY", "").strip().lower()
 TERMINAL_SUCCESS = {"succeeded", "completed", "success"}
 TERMINAL_FAILURE = {"failed", "cancelled", "canceled", "expired"}
 
@@ -706,9 +708,9 @@ HTML = r"""<!doctype html>
             </div>
           </div>
 
-          <label>
+          <label id="apiKeyField">
             API Key
-            <input id="apiKey" type="password" autocomplete="off" placeholder="留空则使用 ARK_API_KEY 环境变量" />
+            <input id="apiKey" type="password" autocomplete="off" placeholder="仅限本地调试；线上使用服务端 ARK_API_KEY" />
           </label>
 
           <div class="grid-2">
@@ -1077,6 +1079,7 @@ HTML = r"""<!doctype html>
       },
       uploadedMedia: {},
       tosLocked: false,
+      allowBrowserApiKey: false,
     };
 
     const $ = (id) => document.getElementById(id);
@@ -1734,6 +1737,12 @@ HTML = r"""<!doctype html>
       };
     }
 
+    function apiKeyPayload() {
+      if (!state.allowBrowserApiKey) return {};
+      const value = $("apiKey")?.value.trim();
+      return value ? { apiKey: value } : {};
+    }
+
     function displayJson(tab = state.activeTab) {
       state.activeTab = tab;
       document.querySelectorAll(".tab").forEach((btn) => {
@@ -1818,7 +1827,7 @@ HTML = r"""<!doctype html>
         displayJson("request");
 
         const data = await postJson("/api/tasks", {
-          apiKey: $("apiKey").value.trim(),
+          ...apiKeyPayload(),
           baseUrl: normalizeBaseUrl($("baseUrl").value),
           requestTimeout: Math.max(30, Number($("requestTimeout").value || 300)),
           outputRoot: outputRootValue(),
@@ -1953,7 +1962,7 @@ HTML = r"""<!doctype html>
         const data = state.runId
           ? await postJson(`/api/tasks/${encodeURIComponent(state.runId)}/cancel`, {})
           : await postJson("/api/cancel-task", {
-              apiKey: $("apiKey").value.trim(),
+              ...apiKeyPayload(),
               baseUrl: normalizeBaseUrl($("baseUrl").value),
               taskId: manualTaskId,
               requestTimeout: Math.max(30, Number($("requestTimeout").value || 300)),
@@ -1995,7 +2004,7 @@ HTML = r"""<!doctype html>
       try {
         setBadge($("taskBadge"), "查询中", "warn");
         const data = await postJson("/api/query-task", {
-          apiKey: $("apiKey").value.trim(),
+          ...apiKeyPayload(),
           baseUrl: normalizeBaseUrl($("baseUrl").value),
           taskId,
           requestTimeout: Math.max(30, Number($("requestTimeout").value || 300)),
@@ -2039,7 +2048,7 @@ HTML = r"""<!doctype html>
       try {
         setBadge($("taskBadge"), "查询最近任务", "warn");
         const data = await postJson("/api/list-tasks", {
-          apiKey: $("apiKey").value.trim(),
+          ...apiKeyPayload(),
           baseUrl: normalizeBaseUrl($("baseUrl").value),
           requestTimeout: Math.max(30, Number($("requestTimeout").value || 300)),
           pageSize: 10,
@@ -2067,7 +2076,7 @@ HTML = r"""<!doctype html>
       try {
         setBadge($("taskBadge"), "查询全部", "warn");
         const data = await postJson("/api/query-local-tasks", {
-          apiKey: $("apiKey").value.trim(),
+          ...apiKeyPayload(),
           baseUrl: normalizeBaseUrl($("baseUrl").value),
           requestTimeout: Math.max(30, Number($("requestTimeout").value || 300)),
           outputRoot: outputRootValue(),
@@ -2104,7 +2113,7 @@ HTML = r"""<!doctype html>
         setBadge($("keyBadge"), "检测中", "warn");
         setBadge($("taskBadge"), "检测连线", "warn");
         const data = await postJson("/api/check-connection", {
-          apiKey: $("apiKey").value.trim(),
+          ...apiKeyPayload(),
           baseUrl: normalizeBaseUrl($("baseUrl").value),
           requestTimeout: Math.max(30, Number($("requestTimeout").value || 300)),
         });
@@ -2214,7 +2223,13 @@ HTML = r"""<!doctype html>
     async function loadConfig() {
       try {
         const data = await getJson("/api/config");
-        setBadge($("keyBadge"), data.hasServerKey ? "环境变量已设置" : "需要输入 Key", data.hasServerKey ? "ok" : "warn");
+        state.allowBrowserApiKey = Boolean(data.allowBrowserApiKey);
+        $("apiKeyField").classList.toggle("hidden", !state.allowBrowserApiKey);
+        if (!state.allowBrowserApiKey) $("apiKey").value = "";
+        const keyLabel = data.hasServerKey
+          ? "服务端 Key 已设置"
+          : (state.allowBrowserApiKey ? "本地可输入 Key" : "缺少服务端 Key");
+        setBadge($("keyBadge"), keyLabel, data.hasServerKey ? "ok" : "warn");
         setBadge($("tosBadge"), data.hasTosKey ? "TOS 环境变量已设置" : "TOS 未检测", data.hasTosKey ? "ok" : "");
         fillTosConfig(data.tos || {
           bucket: data.tosBucket,
@@ -2714,6 +2729,19 @@ def auth_enabled() -> bool:
     return bool(WEB_AUTH_PASSWORD)
 
 
+def cloudflare_access_user(headers: Any) -> str:
+    for name in (
+        "Cf-Access-Authenticated-User-Email",
+        "CF-Access-Authenticated-User-Email",
+        "X-Forwarded-Email",
+        "X-Auth-Request-Email",
+    ):
+        value = (headers.get(name) or "").strip()
+        if value:
+            return value[:200]
+    return ""
+
+
 def basic_auth_user(header: str | None) -> str | None:
     if not auth_enabled():
         return ""
@@ -2732,6 +2760,38 @@ def basic_auth_user(header: str | None) -> str | None:
     if not WEB_AUTH_ALLOW_ANY_USERNAME and not hmac.compare_digest(username, WEB_AUTH_USERNAME):
         return None
     return username
+
+
+def bool_env_value(value: str) -> bool | None:
+    if not value:
+        return None
+    if value in {"1", "true", "yes", "on"}:
+        return True
+    if value in {"0", "false", "no", "off"}:
+        return False
+    return None
+
+
+def host_is_local(headers: Any) -> bool:
+    host = (headers.get("Host") or "").strip().lower()
+    if not host:
+        return True
+    if host.startswith("[") and "]" in host:
+        hostname = host[1:host.index("]")]
+    else:
+        hostname = host.split(":", 1)[0]
+    return hostname in {"localhost", "127.0.0.1", "::1"}
+
+
+def browser_api_key_allowed(headers: Any) -> bool:
+    configured = bool_env_value(SEEDANCE_ALLOW_BROWSER_API_KEY)
+    if configured is not None:
+        return configured
+    return host_is_local(headers)
+
+
+def server_or_local_api_key(body: dict[str, Any]) -> str:
+    return load_server_api_key() or str(body.get("apiKey") or "").strip()
 
 
 def send_text(handler: BaseHTTPRequestHandler, text: str, content_type: str = "text/html; charset=utf-8") -> None:
@@ -2757,7 +2817,7 @@ def read_json_body(handler: BaseHTTPRequestHandler) -> dict[str, Any]:
 def create_task(body: dict[str, Any]) -> dict[str, Any]:
     output_dir: Path | None = None
     run_id = ""
-    api_key = (body.get("apiKey") or "").strip() or load_server_api_key()
+    api_key = server_or_local_api_key(body)
     base_url = normalize_base_url(body.get("baseUrl") or DEFAULT_BASE_URL)
     payload = body.get("payload")
     auth_user = str(body.get("_authUser") or "").strip()
@@ -2781,7 +2841,7 @@ def create_task(body: dict[str, Any]) -> dict[str, Any]:
         report_tsun_usage(
             video_usage_event(auth_user, "video_generation", payload=payload, usage_meta=usage_meta, success=False, error="Missing API Key")
         )
-        raise RuntimeError("Missing API Key. Set ARK_API_KEY before starting the server, or enter it in the page.")
+        raise RuntimeError("Missing API Key. Set ARK_API_KEY before starting the server.")
 
     request_timeout = int(body.get("requestTimeout") or DEFAULT_REQUEST_TIMEOUT)
     request_timeout = max(30, min(request_timeout, 1800))
@@ -2895,6 +2955,17 @@ def create_task(body: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def should_report_status_usage(task: dict[str, Any], status: str, done: bool) -> bool:
+    now = time.time()
+    last_status = str(task.get("last_status_usage_status") or "")
+    last_reported_at = float(task.get("last_status_usage_at") or 0)
+    should_report = not last_status or status != last_status or (now - last_reported_at) >= TSUN_STATUS_REPORT_MIN_SECONDS
+    if should_report:
+        task["last_status_usage_status"] = status
+        task["last_status_usage_at"] = now
+    return should_report
+
+
 def poll_task(run_id: str) -> dict[str, Any]:
     with TASK_LOCK:
         task = TASKS.get(run_id)
@@ -2931,22 +3002,32 @@ def poll_task(run_id: str) -> dict[str, Any]:
         usage=response.get("usage") if isinstance(response, dict) else None,
         response=response,
     )
-    report_tsun_usage(
-        video_usage_event(
-            task.get("auth_user"),
-            "video_status",
-            payload=task.get("payload"),
-            usage_meta=task.get("usage_meta"),
-            response=response,
-            task_id=task["task_id"],
+    if should_report_status_usage(task, status, done):
+        report_tsun_usage(
+            video_usage_event(
+                task.get("auth_user"),
+                "video_status",
+                payload=task.get("payload"),
+                usage_meta=task.get("usage_meta"),
+                response=response,
+                task_id=task["task_id"],
+                run_id=run_id,
+                success=status not in TERMINAL_FAILURE,
+                status_code=status,
+                error=status if status in TERMINAL_FAILURE else "",
+            ),
+            run_id,
+            task["output_dir"],
+        )
+    else:
+        log_event(
+            "usage.report.skipped",
             run_id=run_id,
-            success=status not in TERMINAL_FAILURE,
-            status_code=status,
-            error=status if status in TERMINAL_FAILURE else "",
-        ),
-        run_id,
-        task["output_dir"],
-    )
+            output_dir=task["output_dir"],
+            operation="video_status",
+            reason="status throttle",
+            status=status,
+        )
     return {
         "runId": run_id,
         "taskId": task["task_id"],
@@ -3069,9 +3150,9 @@ def cancel_task(run_id: str) -> dict[str, Any]:
 
 
 def cancel_task_by_id(body: dict[str, Any]) -> dict[str, Any]:
-    api_key = (body.get("apiKey") or "").strip() or load_server_api_key()
+    api_key = server_or_local_api_key(body)
     if not api_key:
-        raise RuntimeError("Missing API Key. Set ARK_API_KEY before starting the server, or enter it in the page.")
+        raise RuntimeError("Missing API Key. Set ARK_API_KEY before starting the server.")
 
     task_id = (body.get("taskId") or "").strip()
     if not task_id:
@@ -3096,9 +3177,9 @@ def cancel_task_by_id(body: dict[str, Any]) -> dict[str, Any]:
 
 
 def query_task_by_id(body: dict[str, Any]) -> dict[str, Any]:
-    api_key = (body.get("apiKey") or "").strip() or load_server_api_key()
+    api_key = server_or_local_api_key(body)
     if not api_key:
-        raise RuntimeError("Missing API Key. Set ARK_API_KEY before starting the server, or enter it in the page.")
+        raise RuntimeError("Missing API Key. Set ARK_API_KEY before starting the server.")
 
     task_id = (body.get("taskId") or "").strip()
     if not task_id:
@@ -3168,9 +3249,9 @@ def query_task_by_id(body: dict[str, Any]) -> dict[str, Any]:
 
 
 def query_local_tasks(body: dict[str, Any]) -> dict[str, Any]:
-    api_key = (body.get("apiKey") or "").strip() or load_server_api_key()
+    api_key = server_or_local_api_key(body)
     if not api_key:
-        raise RuntimeError("Missing API Key. Set ARK_API_KEY before starting the server, or enter it in the page.")
+        raise RuntimeError("Missing API Key. Set ARK_API_KEY before starting the server.")
 
     base_url = normalize_base_url(body.get("baseUrl") or DEFAULT_BASE_URL)
     request_timeout = int(body.get("requestTimeout") or DEFAULT_REQUEST_TIMEOUT)
@@ -3236,9 +3317,9 @@ def query_local_tasks(body: dict[str, Any]) -> dict[str, Any]:
 
 
 def list_tasks(body: dict[str, Any]) -> dict[str, Any]:
-    api_key = (body.get("apiKey") or "").strip() or load_server_api_key()
+    api_key = server_or_local_api_key(body)
     if not api_key:
-        raise RuntimeError("Missing API Key. Set ARK_API_KEY before starting the server, or enter it in the page.")
+        raise RuntimeError("Missing API Key. Set ARK_API_KEY before starting the server.")
 
     base_url = normalize_base_url(body.get("baseUrl") or DEFAULT_BASE_URL)
     request_timeout = int(body.get("requestTimeout") or DEFAULT_REQUEST_TIMEOUT)
@@ -3260,9 +3341,9 @@ def list_tasks(body: dict[str, Any]) -> dict[str, Any]:
 
 
 def check_connection(body: dict[str, Any]) -> dict[str, Any]:
-    api_key = (body.get("apiKey") or "").strip() or load_server_api_key()
+    api_key = server_or_local_api_key(body)
     if not api_key:
-        raise RuntimeError("Missing API Key. Set ARK_API_KEY before starting the server, or enter it in the page.")
+        raise RuntimeError("Missing API Key. Set ARK_API_KEY before starting the server.")
 
     base_url = normalize_base_url(body.get("baseUrl") or DEFAULT_BASE_URL)
     request_timeout = int(body.get("requestTimeout") or DEFAULT_REQUEST_TIMEOUT)
@@ -3464,6 +3545,10 @@ class Handler(BaseHTTPRequestHandler):
         print(f"[{now_iso()}] {self.address_string()} {format % args}")
 
     def ensure_authorized(self) -> bool:
+        access_user = cloudflare_access_user(self.headers)
+        if access_user:
+            self.auth_user = access_user
+            return True
         auth_user = basic_auth_user(self.headers.get("Authorization"))
         if auth_user is not None:
             self.auth_user = auth_user
@@ -3475,6 +3560,12 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write("Authentication required".encode("utf-8"))
         return False
+
+    def read_api_body(self) -> dict[str, Any]:
+        body = read_json_body(self)
+        if "apiKey" in body and not browser_api_key_allowed(self.headers):
+            raise RuntimeError("apiKey request field is disabled in production. Set ARK_API_KEY on the server.")
+        return body
 
     def do_GET(self) -> None:
         try:
@@ -3508,6 +3599,8 @@ class Handler(BaseHTTPRequestHandler):
                     self,
                     {
                         "hasServerKey": bool(load_server_api_key()),
+                        "allowBrowserApiKey": browser_api_key_allowed(self.headers),
+                        "authUser": auth_user,
                         "hasTosKey": bool(load_tos_access_key() and load_tos_secret_key()),
                         "tosLocked": bool(saved_tos or (load_tos_access_key() and load_tos_secret_key())),
                         "tos": effective_tos,
@@ -3543,34 +3636,34 @@ class Handler(BaseHTTPRequestHandler):
             if path.startswith("/api/"):
                 log_event("http.request", method="POST", path=path, client=self.address_string(), auth_user=auth_user)
             if path == "/api/tasks":
-                body = read_json_body(self)
+                body = self.read_api_body()
                 if auth_user:
                     body["_authUser"] = auth_user
                 send_json(self, create_task(body))
                 return
             if path == "/api/tos/check":
-                send_json(self, check_tos(read_json_body(self)))
+                send_json(self, check_tos(self.read_api_body()))
                 return
             if path == "/api/tos/save":
-                send_json(self, save_tos_config(read_json_body(self)))
+                send_json(self, save_tos_config(self.read_api_body()))
                 return
             if path == "/api/tos/upload":
-                send_json(self, upload_to_tos(read_json_body(self)))
+                send_json(self, upload_to_tos(self.read_api_body()))
                 return
             if path == "/api/check-connection":
-                send_json(self, check_connection(read_json_body(self)))
+                send_json(self, check_connection(self.read_api_body()))
                 return
             if path == "/api/query-task":
-                send_json(self, query_task_by_id(read_json_body(self)))
+                send_json(self, query_task_by_id(self.read_api_body()))
                 return
             if path == "/api/query-local-tasks":
-                send_json(self, query_local_tasks(read_json_body(self)))
+                send_json(self, query_local_tasks(self.read_api_body()))
                 return
             if path == "/api/list-tasks":
-                send_json(self, list_tasks(read_json_body(self)))
+                send_json(self, list_tasks(self.read_api_body()))
                 return
             if path == "/api/cancel-task":
-                send_json(self, cancel_task_by_id(read_json_body(self)))
+                send_json(self, cancel_task_by_id(self.read_api_body()))
                 return
             if path.startswith("/api/tasks/") and path.endswith("/cancel"):
                 run_id = path.split("/")[3]
@@ -3638,7 +3731,7 @@ def main() -> int:
     if load_server_api_key():
         print("API key: loaded from environment")
     else:
-        print("API key: not set in environment; enter it in the web page")
+        print("API key: not set in environment; set ARK_API_KEY before production use")
     if auth_enabled():
         if WEB_AUTH_ALLOW_ANY_USERNAME:
             print("Web auth: enabled; any non-empty username is accepted with the shared password")
